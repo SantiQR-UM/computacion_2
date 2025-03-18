@@ -1,0 +1,1 @@
+ls: cannot access 'carpeta_inexistente': No such file or directory
