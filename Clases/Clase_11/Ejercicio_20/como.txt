@@ -1,0 +1,27 @@
+Bash
+
+
+
+python3 signal_receiver.py
+
+Obtendrás la salida inicial con su PID. Anota el PID del receptor.
+
+
+
+--- Ejercicio 20: Receptor de Señales ---
+
+Receptor (PID: 12345) listo para recibir señales.
+
+Para terminar el receptor, envía Ctrl+C o 'kill -SIGTERM 12345'.
+
+Receptor (PID: 12345): Entrando en modo de espera (pause())...
+
+Terminal 2 (Emisor): Lanza el script emisor, pasándole el PID del receptor.
+
+
+
+Bash
+
+
+
+python3 signal_sender.py --pid 12345 --duration 10 # Reemplaza 12345 con el PID real

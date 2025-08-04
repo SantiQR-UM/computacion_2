@@ -1,0 +1,12 @@
+--- Reporte de Análisis Biométrico ---
+Fecha del Reporte: 2025-06-10T12:43:42
+Archivo de Cadena de Bloques: blockchain.json
+
+Cantidad total de bloques: 60
+Número de bloques con alertas: 0
+Número de bloques corruptos detectados: 0
+
+Promedio general de Frecuencia: 118.93
+Promedio general de Presión Sistólica: 148.16
+Promedio general de Oxígeno: 95.26
+----------------------------------------

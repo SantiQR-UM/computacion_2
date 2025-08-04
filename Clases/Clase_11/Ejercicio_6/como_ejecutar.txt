@@ -1,0 +1,6 @@
+Ejecutar de la siguiente forma:
+
+mkfifo /tmp/mi_fifo
+python emisor.py
+python receptor.py
+rm /tmp/mi_fifo

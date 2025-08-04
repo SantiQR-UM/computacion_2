@@ -1,0 +1,1 @@
+python3 generador.py --n 20 | python3 filtro.py --min 50

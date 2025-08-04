@@ -1,0 +1,1 @@
+mkfifo /tmp/mi_fifo_ej17

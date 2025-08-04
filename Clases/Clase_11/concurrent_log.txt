@@ -1,0 +1,12 @@
+Proceso: 1, PID: 18411, Iteración: 1, Tiempo: 2025-06-10 10:41:16.337
+Proceso: 2, PID: 18412, Iteración: 1, Tiempo: 2025-06-10 10:41:16.338
+Proceso: 3, PID: 18413, Iteración: 1, Tiempo: 2025-06-10 10:41:16.341
+Proceso: 4, PID: 18414, Iteración: 1, Tiempo: 2025-06-10 10:41:16.342
+Proceso: 1, PID: 18411, Iteración: 2, Tiempo: 2025-06-10 10:41:16.438
+Proceso: 2, PID: 18412, Iteración: 2, Tiempo: 2025-06-10 10:41:16.440
+Proceso: 3, PID: 18413, Iteración: 2, Tiempo: 2025-06-10 10:41:16.443
+Proceso: 4, PID: 18414, Iteración: 2, Tiempo: 2025-06-10 10:41:16.444
+Proceso: 1, PID: 18411, Iteración: 3, Tiempo: 2025-06-10 10:41:16.539
+Proceso: 2, PID: 18412, Iteración: 3, Tiempo: 2025-06-10 10:41:16.541
+Proceso: 3, PID: 18413, Iteración: 3, Tiempo: 2025-06-10 10:41:16.544
+Proceso: 4, PID: 18414, Iteración: 3, Tiempo: 2025-06-10 10:41:16.545
