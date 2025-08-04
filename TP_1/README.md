@@ -21,12 +21,12 @@ El sistema se compone de los siguientes procesos:
 
 ## Estructura del Proyecto
 
-.
-├── main_system.py
-├── verificar_cadena.py
-├── README.md
-├── blockchain.json  (generado al ejecutar main_system.py)
-└── reporte.txt      (generado al ejecutar verificar_cadena.py)
+- .
+- ├── main_system.py
+- ├── verificar_cadena.py
+- ├── README.md
+- ├── blockchain.json  (generado al ejecutar main_system.py)
+- └── reporte.txt      (generado al ejecutar verificar_cadena.py)
 
 ## Instrucciones de Ejecución
 
