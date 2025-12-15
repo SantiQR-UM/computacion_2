@@ -49,7 +49,11 @@ Recibir videos de clientes, extraer frames, distribuirlos a workers, reensamblar
 - Asigna `task_id` a cada frame
 
 #### 3. Aggregator
-- Espera resultados de Celery (futures)
+- Hace polling asíncrono en filesystem compartido esperando frames procesados
+- Usa `wait_for_frame()` que chequea cada 100ms la existencia de:
+  - `frame_XXXXXX.png`: Frame procesado
+  - `frame_XXXXXX.json`: Estadísticas del procesamiento
+- Timeout de 5 minutos por frame
 - Reconstruye frames procesados en orden
 - Envía frames al muxer
 
@@ -59,11 +63,15 @@ Recibir videos de clientes, extraer frames, distribuirlos a workers, reensamblar
 - Usa `ThreadPoolExecutor` para escritura I/O-bound
 
 #### 5. Preview HTTP
-- Servidor HTTP (`http.server`) en puerto separado (default: 8080)
+- Servidor HTTP Flask en puerto separado (default: 8080)
+- Dashboard web con updates en tiempo real (Server-Sent Events)
 - Endpoints:
-  - `/metrics`: JSON con métricas en tiempo real
-  - `/frame/<n>`: Frame específico (JPG)
-  - `/preview.gif`: GIF animado del progreso
+  - `/`: Dashboard principal con visualización de sesiones
+  - `/sessions`: Lista de sesiones activas (JSON)
+  - `/session/<id>/status`: Estado de una sesión específica
+  - `/session/<id>/stream`: Stream SSE de progreso en tiempo real
+  - `/session/<id>/preview.gif`: GIF animado del video procesado
+  - `/session/<id>/frame/<n>`: Frame específico (PNG)
 
 ### Argumentos
 - `--bind ADDR`: Dirección de escucha (default: `::`)
@@ -85,7 +93,7 @@ Recibir videos de clientes, extraer frames, distribuirlos a workers, reensamblar
 ## Worker (`worker.py`)
 
 ### Funcionalidad principal
-Procesar frames individuales aplicando filtros de OpenCV según el tipo solicitado.
+Procesar frames individuales aplicando filtros de OpenCV según el tipo solicitado, y escribir resultados a filesystem compartido.
 
 ### Tarea Celery: `process_frame`
 
@@ -93,7 +101,7 @@ Procesar frames individuales aplicando filtros de OpenCV según el tipo solicita
 - `frame_data`: bytes del frame (PNG/JPG codificado)
 - `frame_number`: número de secuencia
 - `processing_type`: tipo de procesamiento (`blur`, `faces`, `edges`, `motion`)
-- `metadata`: diccionario con parámetros adicionales
+- `metadata`: diccionario con parámetros adicionales (incluye `session_id`)
 
 **Procesamiento:**
 1. Decodificar frame (OpenCV `cv2.imdecode`)
@@ -104,16 +112,23 @@ Procesar frames individuales aplicando filtros de OpenCV según el tipo solicita
    - `motion`: Diferencia con frame anterior
    - `custom`: Pipeline personalizado
 3. Codificar frame procesado
+4. **Escribir a filesystem compartido**:
+   - Crea directorio `/app/data/frames/{session_id}/` si no existe
+   - Escribe frame procesado: `frame_{number:06d}.png`
+   - Escribe estadísticas: `frame_{number:06d}.json` con métricas (tiempo_ms, memoria_mb, filtro_aplicado, worker_id, hostname)
 
-**Salida:**
-- `frame_data`: bytes del frame procesado
-- `stats`: diccionario con métricas (tiempo_ms, memoria_mb, filtro_aplicado)
+**Salida (al filesystem, NO vía Celery):**
+- Archivo PNG: Frame procesado
+- Archivo JSON: Estadísticas del procesamiento
+
+**Nota:** Los workers NO devuelven resultados vía Celery result backend. El valor de retorno de la tarea Celery es solo un diccionario de confirmación, pero los datos reales se escriben a disco.
 
 ### Configuración Celery
 - Cola: `frames`
 - Reintentos: 3 (exponential backoff)
 - Timeout: 30s por frame
 - Rate limiting: 64 frames/s
+- **Backend:** Ninguno (se eliminó Redis result backend)
 
 ---
 

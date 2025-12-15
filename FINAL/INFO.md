@@ -40,9 +40,9 @@ Usar `asyncio` para el servidor TCP en lugar de threading o multiprocessing.
 ## 4. Celery + Redis para Distribución de Tareas
 
 ### Decisión
-Usar Celery con Redis como broker en lugar de implementar una cola custom.
+Usar Celery con Redis solo como broker (NO se usa result backend).
 
-**NOTA IMPORTANTE**: Durante el desarrollo se eliminó el Redis result backend (ver sección 16 más abajo).
+**NOTA IMPORTANTE**: Se usa Redis únicamente como broker. Los resultados se intercambian vía filesystem compartido (ver sección 16 más abajo).
 
 ### Justificación
 - **Solución probada**: Celery es estándar de industria para tareas distribuidas
@@ -51,17 +51,37 @@ Usar Celery con Redis como broker en lugar de implementar una cola custom.
 - **Simplicidad**: Evita reinventar la rueda con una cola custom
 - **Requisito del curso**: "Uso de cola de tareas distribuidas" → Celery cumple perfectamente
 
-## 5. concurrent.futures (ThreadPoolExecutor) para Escritura de Video
+## 5. concurrent.futures (ThreadPoolExecutor) para Operaciones I/O-Bound
 
 ### Decisión
-Usar `ThreadPoolExecutor` para escritura de video en lugar de multiprocessing o escribir sincrónicamente.
+Usar `ThreadPoolExecutor` en DOS contextos I/O-bound:
+1. **Escritura de video** (VideoWriter)
+2. **Polling paralelo de frames** (FrameCollector) ⭐ **NUEVO**
 
 ### Justificación
-- **I/O-bound**: Escribir a disco es operación I/O-bound, no CPU-bound
+
+#### General
+- **I/O-bound**: Operaciones de disco (escritura/lectura) son I/O-bound, no CPU-bound
 - **GIL no es problema**: I/O libera el GIL en Python
 - **Simplicidad**: Interfaz más simple que multiprocessing
 - **Preferencia del enunciado**: "si hay dos similares como multiprocessing y futures, utilizar el que más conveniente, como futures"
 - **Menor overhead**: Threads son más livianos que procesos para I/O
+
+#### Caso 1: Escritura de Video (VideoWriter)
+- Escribir frames a disco no debe bloquear el event loop de asyncio
+- ThreadPoolExecutor con 1 worker para escritura secuencial
+- Futures para sincronización asíncrona
+
+#### Caso 2: Polling Paralelo de Frames (FrameCollector) ⭐
+- **Problema**: Esperar que 300 frames aparezcan en disco secuencialmente es lento
+- **Solución**: ThreadPoolExecutor con 8 workers haciendo polling en paralelo
+- **Ventajas**:
+  - Polling de múltiples frames simultáneamente
+  - Callbacks para progress tracking en tiempo real
+  - `as_completed()` procesa frames a medida que llegan (no espera a todos)
+  - Compatible con asyncio via `loop.run_in_executor()`
+  - Actualización de métricas (FPS, ETA) en tiempo real a Redis
+- **Implementación**: `src/frame_collector.py` usado por `server.py`
 
 ## 6. OpenCV para Todo el Pipeline de Video
 
@@ -206,16 +226,14 @@ Usar `argparse` para parseo de argumentos en cliente y servidor.
 | E/S Unix | Lectura/escritura de archivos de video |
 | Argumentos | argparse en client.py y server.py |
 | Procesos | Workers de Celery como procesos separados |
-| Pipes/FIFOs | (Opcional) Demo con ffmpeg |
-| Multiprocessing | Opcional dentro de workers para subdivisión |
-| Threading | ThreadPoolExecutor para escritura de video |
+| Threading | ThreadPoolExecutor para escritura de video y polling de frames |
 | Docker | Dockerfiles + docker-compose.yml |
 | Redes | TCP dual-stack, protocolos |
 | Sockets | Comunicación cliente-servidor |
-| HTTP | (Futuro) Servidor de preview |
+| HTTP | Servidor de preview con Flask y SSE |
 | IPv6 | Dual-stack con IPV6_V6ONLY=0 |
 | Asyncio | Servidor asíncrono, event loop |
-| concurrent.futures | ThreadPoolExecutor para I/O |
+| concurrent.futures | ThreadPoolExecutor para I/O (escritura + polling paralelo) |
 | Celery | Cola de tareas distribuidas, workers |
 
 ## 16. Eliminación de Redis Result Backend (Cambio Arquitectónico)

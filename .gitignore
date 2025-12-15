@@ -43,6 +43,7 @@ temp/
 output_*
 input_*
 FINAL_before_preview.zip
+FINAL_before_frame_collector.zip
 
 # IDE
 .vscode/

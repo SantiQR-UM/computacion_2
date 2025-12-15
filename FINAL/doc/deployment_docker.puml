@@ -1,7 +1,7 @@
 @startuml deployment_docker
 !theme plain
 title Arquitectura de Despliegue con Docker
-caption 5 contenedores orquestados con docker-compose
+caption 6 contenedores orquestados con docker-compose
 
 skinparam backgroundColor white
 skinparam componentStyle rectangle
@@ -67,8 +67,18 @@ package "Docker Network: video_net\n172.20.0.0/16 (IPv4) + fd00:dead:beef::/48 (
       src/server.py
       ----
       Puerto: 9090 (TCP)
-      Puerto: 8080 (HTTP)*
-      *no implementado
+    ]
+  }
+
+  ' Preview Container
+  node "Container: video_preview\npython:3.11-slim" as preview_container {
+    component "Preview HTTP" as preview [
+      **Preview HTTP**
+      ----
+      src/preview_server.py
+      ----
+      Puerto: 8080 (HTTP)
+      Sirve frames y métricas
     ]
   }
 
@@ -132,8 +142,11 @@ note on link
   0.0.0.0:9090 -> 9090
 end note
 
+client -[#0066CC,thickness=2]-> preview : HTTP :8080\n(preview/metrics)
+
 ' Network interno
 server -[#E74C3C]-> redis : Redis protocol\n:6379
+preview -[#E74C3C]-> redis : Redis protocol\n:6379
 w1 -[#E74C3C]-> redis : Celery broker
 w2 -[#E74C3C]-> redis
 w3 -[#E74C3C]-> redis
@@ -141,6 +154,7 @@ w4 -[#E74C3C]-> redis
 
 ' Montajes de volumen
 server_container -[#8B4513,dashed]-> volume : mount\n/app/data
+preview_container -[#8B4513,dashed]-> volume : mount\n/app/data
 w1_container -[#8B4513,dashed]-> volume : mount\n/app/data
 w2_container -[#8B4513,dashed]-> volume : mount\n/app/data
 w3_container -[#8B4513,dashed]-> volume : mount\n/app/data
@@ -154,16 +168,17 @@ legend bottom
   |= Componente |= Imagen Base |= RAM típico |= CPU |
   | Redis | redis:7-alpine | ~50MB | 0.1 core |
   | Servidor | python:3.11-slim | ~100MB | 0.2 core |
+  | Preview HTTP | python:3.11-slim | ~50MB | 0.1 core |
   | Worker | python:3.11-slim + opencv | ~200MB | 1 core |
 
   **Recursos totales recomendados:**
-  - **RAM**: 2GB mínimo (0.05 + 0.1 + 4×0.2 = 0.95GB + overhead)
+  - **RAM**: 2GB mínimo (0.05 + 0.1 + 0.05 + 4×0.2 = 1GB + overhead)
   - **CPU**: 4+ cores (1 por worker para paralelismo real)
   - **Disco**: 10GB para volumen compartido (frames temporales)
 
   **Comandos útiles:**
   ""docker-compose up --build"" - Lanzar todos los servicios
-  ""docker-compose scale worker1=8"" - Escalar workers
+  ""docker-compose scale worker=8"" - Escalar workers
   ""docker-compose ps"" - Ver estado de contenedores
   ""docker-compose logs -f server"" - Ver logs del servidor
 endlegend

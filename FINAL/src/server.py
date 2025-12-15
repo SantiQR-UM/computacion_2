@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from protocol import messages
 from storage.writer import VideoWriter, VideoFrameBuffer
 from metrics.stats import MetricsCollector
+from frame_collector import FrameCollector, FrameResult
 
 # Importar la aplicación Celery y la tarea
 from worker import app as celery_app, process_frame
@@ -127,6 +128,9 @@ class VideoProcessor:
         Returns:
             Tuple: (lista de tareas, dict de frames originales, dict de propiedades del video)
         """
+        # Inicializar tiempo de inicio para cálculos de FPS/ETA
+        self.start_time = time.time()
+
         loop = asyncio.get_event_loop()
         # Ejecutar la extracción bloqueante en un thread pool
         return await loop.run_in_executor(
@@ -136,50 +140,85 @@ class VideoProcessor:
         )
 
     async def get_celery_results(self, tasks: list, executor=None) -> list:
-        """Espera a que todos los frames se procesen chequeando el sistema de archivos."""
+        """Espera frames usando FrameCollector con progress tracking en tiempo real."""
         frames_dir = f'/app/data/frames/{self.session_id}'
+        frame_numbers = [frame_num for frame_num, _ in tasks]
+        total_frames = len(frame_numbers)
 
-        async def wait_for_frame(frame_number):
-            """Espera a que un frame específico aparezca en disco."""
-            frame_path = os.path.join(frames_dir, f'frame_{frame_number:06d}.png')
-            stats_path = os.path.join(frames_dir, f'frame_{frame_number:06d}.json')
-            max_wait = 300  # 5 minutos timeout
-            check_interval = 0.1  # Chequear cada 100ms
-            waited = 0
+        # Crear collector con configuración optimizada
+        collector = FrameCollector(
+            frames_dir=frames_dir,
+            max_workers=8,      # 8 threads en paralelo para polling I/O-bound
+            poll_interval=0.1,  # Check cada 100ms
+            timeout=300.0       # 5 minutos timeout por frame
+        )
 
-            while waited < max_wait:
-                if os.path.exists(frame_path) and os.path.exists(stats_path):
-                    # Leer stats desde el archivo JSON
-                    import json
-                    try:
-                        with open(stats_path, 'r') as f:
-                            stats = json.load(f)
-                    except Exception:
-                        # Si falla, usar stats por defecto
-                        stats = {
-                            'processing_time_ms': 0,
-                            'memory_mb': 0,
-                            'memory_delta_mb': 0,
-                            'filter_applied': 'unknown',
-                            'worker_id': 'unknown',
-                            'hostname': 'unknown'
-                        }
+        # Callback para progress tracking en tiempo real
+        completed_count = [0]  # Usar lista para modificar en closure
 
-                    return {
-                        'frame_path': frame_path,
-                        'frame_number': frame_number,
-                        'stats': stats
-                    }
-                await asyncio.sleep(check_interval)
-                waited += check_interval
+        def on_frame_ready(result: FrameResult):
+            """Callback ejecutado cuando cada frame está listo."""
+            completed_count[0] += 1
+            progress = (completed_count[0] / total_frames) * 100
 
-            # Timeout - retornar error
-            raise TimeoutError(f"Frame {frame_number} no apareció en {max_wait}s")
+            # Calcular FPS y ETA
+            elapsed = time.time() - self.start_time
+            current_fps = completed_count[0] / elapsed if elapsed > 0 else 0
+            frames_remaining = total_frames - completed_count[0]
+            eta_seconds = frames_remaining / current_fps if current_fps > 0 else 0
 
-        print("Esperando que todos los frames se procesen en disco...")
-        awaiting_coroutines = [wait_for_frame(frame_num) for frame_num, _ in tasks]
-        all_results = await asyncio.gather(*awaiting_coroutines, return_exceptions=True)
-        print("Todos los frames procesados.")
+            # Actualizar Redis solo cada 5 frames, en hitos importantes, o en el último frame
+            # (Reducir overhead de Redis: de 301 updates a ~60 updates)
+            should_update_redis = (
+                completed_count[0] % 5 == 0 or  # Cada 5 frames
+                completed_count[0] == total_frames or  # Último frame
+                completed_count[0] == 1 or  # Primer frame
+                int(progress) in [10, 25, 50, 75, 90]  # Hitos importantes
+            )
+
+            # Imprimir progreso solo cada 10 frames o en hitos importantes
+            should_print = (
+                completed_count[0] % 10 == 0 or  # Cada 10 frames
+                completed_count[0] == total_frames or  # Último frame
+                int(progress) in [10, 25, 50, 75, 90, 100]  # Hitos
+            )
+
+            if should_print:
+                eta_str = f"{int(eta_seconds)}s" if eta_seconds < 60 else f"{int(eta_seconds/60)}m {int(eta_seconds%60)}s"
+                print(f"[{self.session_id}] ✓ {completed_count[0]}/{total_frames} frames ({progress:.1f}%) | {current_fps:.1f} FPS | ETA: {eta_str}")
+
+            # Actualizar Redis con frecuencia reducida
+            if should_update_redis and redis_client:
+                try:
+                    redis_client.set(f'session:{self.session_id}:progress', f'{progress:.2f}')
+                    redis_client.set(f'session:{self.session_id}:frames_processed', completed_count[0])
+                    redis_client.set(f'session:{self.session_id}:current_fps', f'{current_fps:.2f}')
+                    redis_client.set(f'session:{self.session_id}:eta_seconds', f'{eta_seconds:.1f}')
+                except Exception as e:
+                    pass  # Ignore Redis errors
+
+        # Usar versión async (no bloquea el event loop de asyncio)
+        print(f"[{self.session_id}] Esperando que {total_frames} frames se procesen en disco (con progress tracking)...")
+        results = await collector.collect_frames_async(frame_numbers, callback=on_frame_ready)
+        print(f"[{self.session_id}] Todos los frames procesados.")
+
+        # Convertir de FrameResult a formato esperado por _process_results_sync
+        all_results = []
+        for r in results:
+            if r.frame_path:
+                all_results.append({
+                    'frame_path': r.frame_path,
+                    'frame_number': r.frame_number,
+                    'stats': r.stats
+                })
+            else:
+                # Frame con error
+                all_results.append({
+                    'error': r.stats.get('error', 'Unknown error'),
+                    'frame_number': r.frame_number,
+                    'stats': r.stats
+                })
+
         return all_results
 
     def _process_results_sync(
@@ -201,7 +240,7 @@ class VideoProcessor:
         )
         frame_buffer = VideoFrameBuffer(writer)
 
-        print(f"Procesando {len(all_results)} resultados...")
+        print(f"[{self.session_id}] Procesando {len(all_results)} resultados y escribiendo video...")
         for i, result in enumerate(all_results):
             frame_num = tasks[i][0]
             processed_frame = None
@@ -324,7 +363,7 @@ class ClientHandler:
             video_path = await self._receive_video(handshake)
             output_path = f"output_{self.session_id}.mp4"
 
-            # 2. Despachar tareas (ahora async, no bloquea el event loop)
+            # 2. Despachar tareas (async, no bloquea el event loop)
             processor = VideoProcessor(
                 self.session_id,
                 handshake.get("processing", "blur"),
@@ -388,9 +427,19 @@ class ClientHandler:
             # Actualizar estado a completado en Redis
             if redis_client and result.get("ok"):
                 try:
+                    end_time = time.time()
                     redis_client.set(f'session:{self.session_id}:status', 'completed')
-                    redis_client.set(f'session:{self.session_id}:end_time', str(time.time()))
+                    redis_client.set(f'session:{self.session_id}:end_time', str(end_time))
+
+                    # Calcular y guardar tiempo total de procesamiento
+                    start_time_str = redis_client.get(f'session:{self.session_id}:start_time')
+                    if start_time_str:
+                        total_time = end_time - float(start_time_str)
+                        redis_client.set(f'session:{self.session_id}:total_time_seconds', f'{total_time:.2f}')
+                        print(f"[{self.session_id}] Procesamiento completado en {total_time:.1f}s")
+
                     redis_client.expire(f'session:{self.session_id}:end_time', 3600)
+                    redis_client.expire(f'session:{self.session_id}:total_time_seconds', 3600)
                     print(f"[{self.session_id}] Estado actualizado a 'completed' en Redis")
                 except Exception as e:
                     print(f"[{self.session_id}] Error actualizando estado en Redis: {e}")
@@ -585,9 +634,9 @@ async def start_server(bind_addr: str, port: int):
             sock.listen()
             sock.setblocking(False)
 
-            # Crear servidor asyncio usando el socket pre-configurado
+            # Crear objeto servidor asyncio usando el socket pre-configurado por cada conexion
             server = await asyncio.start_server(
-                handle_client,
+                handle_client, # Nos movemos a handle_client
                 sock=sock
             )
 

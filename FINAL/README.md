@@ -131,11 +131,12 @@ Ver [doc/ARQUITECTURA.md](doc/ARQUITECTURA.md) para detalles.
 - **Python 3.11**: Lenguaje principal
 - **asyncio**: Servidor asíncrono
 - **Celery**: Cola de tareas distribuidas
-- **Redis**: Broker y backend para Celery
+- **Redis**: Broker para Celery (NO se usa result backend)
 - **OpenCV**: Procesamiento de video y filtros
 - **Docker**: Contenerización y orquestación
 - **argparse**: Parseo de argumentos CLI
-- **concurrent.futures**: ThreadPoolExecutor para I/O-bound
+- **concurrent.futures**: ThreadPoolExecutor para I/O (escritura de video + polling paralelo de frames)
+- **Flask**: Servidor HTTP de preview
 - **psutil**: Métricas de sistema
 
 ## Temas de la Materia Aplicados
@@ -147,14 +148,14 @@ Ver [doc/ARQUITECTURA.md](doc/ARQUITECTURA.md) para detalles.
 - Pipes/FIFOs: Comunicación interproceso (opcional)
 - Concurrencia: asyncio para I/O concurrente
 - Paralelismo: Celery workers para procesamiento CPU-bound
-- Threading: ThreadPoolExecutor para escritura de video
+- Threading: ThreadPoolExecutor para escritura de video y polling paralelo de frames
 - Docker: Despliegue en contenedores
 - Redes: TCP dual-stack (IPv4/IPv6)
 - Sockets: Comunicación cliente-servidor
-- HTTP: Servidor de preview (futuro)
+- HTTP: Servidor de preview con Flask y SSE
 - IPv6: Dual-stack con IPV6_V6ONLY=0
 - Asyncio: Event loop, async/await
-- concurrent.futures: Abstracciones de paralelismo
+- concurrent.futures: ThreadPoolExecutor para I/O-bound, Futures, as_completed, callbacks
 - Celery: Tareas distribuidas, reintentos, rate limiting
 
 ## Métricas Reportadas

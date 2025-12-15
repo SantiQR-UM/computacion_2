@@ -11,7 +11,7 @@ Este directorio contiene los diagramas de arquitectura del sistema en formato Pl
 - Redis como broker (NO result backend)
 - Filesystem compartido para resultados
 - 4 Workers de Celery procesando frames completos
-- Preview HTTP marcado como NO IMPLEMENTADO
+- Preview HTTP con Flask y SSE (implementado)
 
 ### 2. `flujo_secuencial.puml`
 **Diagrama de secuencia** mostrando el flujo completo de procesamiento:
@@ -26,10 +26,10 @@ Este directorio contiene los diagramas de arquitectura del sistema en formato Pl
 
 ### 3. `deployment_docker.puml`
 **Diagrama de deployment** mostrando la arquitectura Docker:
-- 5 contenedores (redis, server, 4 workers)
+- 6 contenedores (redis, server, preview, 4 workers)
 - Red Docker con dual-stack IPv6/IPv4
 - Volumen compartido para frames
-- Mapeos de puertos
+- Mapeos de puertos (9090 TCP, 8080 HTTP)
 - Recursos típicos (RAM, CPU)
 
 ### 4. `arquitectura_actual.svg`

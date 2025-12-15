@@ -57,12 +57,23 @@ package "Servidor Asyncio" as server #White {
   ]
 }
 
-note right of srv #FFE6E6
-  ❌ **Preview HTTP NO IMPLEMENTADO**
-  (planeado :8080)
-  /metrics
-  /frame/<n>
-end note
+package "Preview HTTP (contenedor separado)" as preview_pkg #White {
+  component "Preview Server" as preview [
+    **Preview HTTP**
+    ----
+    Flask + SSE :8080
+    ----
+    / (dashboard)
+    /sessions
+    /session/<id>/status
+    /session/<id>/stream (SSE)
+    /session/<id>/preview.gif
+    /session/<id>/frame/<n>
+    ----
+    Lee frames desde
+    volumen compartido
+  ]
+}
 
 ' ============================================================================
 ' INFRAESTRUCTURA
@@ -166,6 +177,9 @@ w4 -[#8B4513,dashed,thickness=2]-> fs
 
 ' Servidor <- Filesystem (polling)
 fs -[#8B4513,dashed,thickness=2]-> srv : polling\nasync
+
+' Preview <- Filesystem (lectura)
+fs -[#8B4513,dashed,thickness=2]-> preview : lee frames\npara servir HTTP
 
 ' ============================================================================
 ' NOTAS EXPLICATIVAS

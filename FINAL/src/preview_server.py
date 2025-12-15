@@ -72,12 +72,17 @@ def get_session_progress(session_id):
         video_name = redis_client.get(f'session:{session_id}:video_name') or 'unknown'
         start_time_str = redis_client.get(f'session:{session_id}:start_time')
 
-        # Contar frames procesados en el volumen compartido
-        frames_dir = os.path.join(FRAMES_DIR, session_id)
-        if os.path.exists(frames_dir):
-            processed_count = len(glob.glob(os.path.join(frames_dir, 'frame_*.png')))
+        # Obtener frames procesados de Redis (actualizado en tiempo real por el servidor)
+        processed_count_str = redis_client.get(f'session:{session_id}:frames_processed')
+        if processed_count_str:
+            processed_count = int(processed_count_str)
         else:
-            processed_count = 0
+            # Fallback: contar frames en el filesystem si Redis no tiene el valor
+            frames_dir = os.path.join(FRAMES_DIR, session_id)
+            if os.path.exists(frames_dir):
+                processed_count = len(glob.glob(os.path.join(frames_dir, 'frame_*.png')))
+            else:
+                processed_count = 0
 
         # Calcular progreso
         progress = (processed_count / total_frames * 100) if total_frames > 0 else 0
@@ -112,9 +117,16 @@ def get_session_progress(session_id):
             except:
                 pass
 
-        # Si el status es completado, ETA debe ser 0
+        # Si el status es completado, obtener tiempo total de procesamiento
+        total_time = None
         if status == 'completed':
             eta = 0
+            total_time_str = redis_client.get(f'session:{session_id}:total_time_seconds')
+            if total_time_str:
+                try:
+                    total_time = float(total_time_str)
+                except:
+                    pass
 
         return {
             'session_id': session_id,
@@ -125,7 +137,8 @@ def get_session_progress(session_id):
             'progress': round(progress, 2),
             'status': status,
             'fps': round(fps, 2),
-            'eta_seconds': round(eta, 1) if eta is not None else None
+            'eta_seconds': round(eta, 1) if eta is not None else None,
+            'total_time_seconds': round(total_time, 1) if total_time is not None else None
         }
     except Exception as e:
         return {
@@ -422,12 +435,18 @@ def dashboard():
                 framesValue.textContent = `${data.processed_frames}/${data.total_frames}`;
                 fpsValue.textContent = data.fps.toFixed(1);
 
-                if (data.eta_seconds === null || data.eta_seconds === undefined) {
+                // Mostrar ETA o tiempo total según el estado
+                if (data.status === 'completed' && data.total_time_seconds) {
+                    etaValue.textContent = formatTime(data.total_time_seconds);
+                    etaValue.parentElement.querySelector('.stat-label').textContent = 'Tiempo Total';
+                } else if (data.eta_seconds === null || data.eta_seconds === undefined) {
                     etaValue.textContent = 'Calculando...';
                 } else if (data.eta_seconds > 0) {
                     etaValue.textContent = formatTime(data.eta_seconds);
+                    etaValue.parentElement.querySelector('.stat-label').textContent = 'ETA';
                 } else {
                     etaValue.textContent = '-';
+                    etaValue.parentElement.querySelector('.stat-label').textContent = 'ETA';
                 }
 
                 // Actualizar status badge
