@@ -1,0 +1,81 @@
+services:
+  # Redis como broker y backend para Celery
+  redis:
+    image: redis:7-alpine
+    container_name: video_redis
+    command: redis-server --maxmemory 8gb --maxmemory-policy allkeys-lru --maxclients 10000
+    ports:
+      - "6379:6379"
+    networks:
+      - video_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Servidor de procesamiento de video
+  server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.server
+    container_name: video_server
+    ports:
+      - "9090:9090"  # TCP para clientes
+    networks:
+      - video_net
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ../src:/app/src
+      - video_data:/app/data
+
+  # Servidor HTTP de preview
+  preview:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.preview
+    container_name: video_preview
+    ports:
+      - "8080:8080"  # HTTP preview
+    networks:
+      - video_net
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ../src:/app/src
+      - video_data:/app/data
+
+  # Workers de Celery (escalables con --scale worker=N)
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.worker
+    networks:
+      - video_net
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ../src:/app/src
+      - video_data:/app/data
+
+networks:
+  video_net:
+    driver: bridge
+    enable_ipv6: true
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+        - subnet: fd00:dead:beef::/48
+
+volumes:
+  video_data:

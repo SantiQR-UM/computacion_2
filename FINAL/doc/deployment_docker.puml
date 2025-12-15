@@ -1,0 +1,188 @@
+@startuml deployment_docker
+!theme plain
+title Arquitectura de Despliegue con Docker
+caption 5 contenedores orquestados con docker-compose
+
+skinparam backgroundColor white
+skinparam componentStyle rectangle
+
+' Estilos
+skinparam node {
+  BackgroundColor #E8F4F8
+  BorderColor #2C5F7C
+  BorderThickness 2
+  FontSize 12
+}
+
+skinparam component {
+  BackgroundColor White
+  BorderColor #333333
+  BorderThickness 1
+  FontSize 11
+}
+
+skinparam cloud {
+  BackgroundColor #F0F0F0
+  BorderColor #666666
+}
+
+' ============================================================================
+' HOST MACHINE
+' ============================================================================
+
+cloud "Host Machine" as host {
+  component "Cliente Python" as client [
+    **Cliente**
+    ----
+    src/client.py
+    ----
+    Corre en host
+    (no en Docker)
+  ]
+}
+
+' ============================================================================
+' DOCKER NETWORK
+' ============================================================================
+
+package "Docker Network: video_net\n172.20.0.0/16 (IPv4) + fd00:dead:beef::/48 (IPv6)" as network {
+
+  ' Redis Container
+  node "Container: video_redis\nredis:7-alpine" as redis_container {
+    component "Redis Server" as redis [
+      **Redis**
+      ----
+      Broker para Celery
+      ----
+      Puerto: 6379
+      Memoria: 8GB
+    ]
+  }
+
+  ' Server Container
+  node "Container: video_server\npython:3.11-slim" as server_container {
+    component "Servidor Asyncio" as server [
+      **Servidor**
+      ----
+      src/server.py
+      ----
+      Puerto: 9090 (TCP)
+      Puerto: 8080 (HTTP)*
+      *no implementado
+    ]
+  }
+
+  ' Worker Containers
+  node "Container: video_worker1\npython:3.11-slim + OpenCV" as w1_container {
+    component "Celery Worker 1" as w1 [
+      **Worker 1**
+      ----
+      celery worker
+      -Q frames
+    ]
+  }
+
+  node "Container: video_worker2\npython:3.11-slim + OpenCV" as w2_container {
+    component "Celery Worker 2" as w2 [
+      **Worker 2**
+      ----
+      celery worker
+      -Q frames
+    ]
+  }
+
+  node "Container: video_worker3\npython:3.11-slim + OpenCV" as w3_container {
+    component "Celery Worker 3" as w3 [
+      **Worker 3**
+      ----
+      celery worker
+      -Q frames
+    ]
+  }
+
+  node "Container: video_worker4\npython:3.11-slim + OpenCV" as w4_container {
+    component "Celery Worker 4" as w4 [
+      **Worker 4**
+      ----
+      celery worker
+      -Q frames
+    ]
+  }
+}
+
+' ============================================================================
+' DOCKER VOLUME
+' ============================================================================
+
+storage "Docker Volume: video_data" as volume {
+  folder "/app/data/frames/" as frames {
+    file "frame_*.png"
+    file "frame_*.json"
+  }
+}
+
+' ============================================================================
+' CONEXIONES
+' ============================================================================
+
+' Host -> Server
+client -[#0066CC,thickness=2]-> server : TCP :9090\n(port mapping)
+note on link
+  Publicado a host
+  0.0.0.0:9090 -> 9090
+end note
+
+' Network interno
+server -[#E74C3C]-> redis : Redis protocol\n:6379
+w1 -[#E74C3C]-> redis : Celery broker
+w2 -[#E74C3C]-> redis
+w3 -[#E74C3C]-> redis
+w4 -[#E74C3C]-> redis
+
+' Montajes de volumen
+server_container -[#8B4513,dashed]-> volume : mount\n/app/data
+w1_container -[#8B4513,dashed]-> volume : mount\n/app/data
+w2_container -[#8B4513,dashed]-> volume : mount\n/app/data
+w3_container -[#8B4513,dashed]-> volume : mount\n/app/data
+w4_container -[#8B4513,dashed]-> volume : mount\n/app/data
+
+' ============================================================================
+' LEYENDA
+' ============================================================================
+
+legend bottom
+  |= Componente |= Imagen Base |= RAM típico |= CPU |
+  | Redis | redis:7-alpine | ~50MB | 0.1 core |
+  | Servidor | python:3.11-slim | ~100MB | 0.2 core |
+  | Worker | python:3.11-slim + opencv | ~200MB | 1 core |
+
+  **Recursos totales recomendados:**
+  - **RAM**: 2GB mínimo (0.05 + 0.1 + 4×0.2 = 0.95GB + overhead)
+  - **CPU**: 4+ cores (1 por worker para paralelismo real)
+  - **Disco**: 10GB para volumen compartido (frames temporales)
+
+  **Comandos útiles:**
+  ""docker-compose up --build"" - Lanzar todos los servicios
+  ""docker-compose scale worker1=8"" - Escalar workers
+  ""docker-compose ps"" - Ver estado de contenedores
+  ""docker-compose logs -f server"" - Ver logs del servidor
+endlegend
+
+note bottom of network
+  **Red Docker con dual-stack IPv6/IPv4**
+  - enable_ipv6: true
+  - Subnet IPv4: 172.20.0.0/16
+  - Subnet IPv6: fd00:dead:beef::/48
+  - Driver: bridge
+end note
+
+note right of volume
+  **Volumen persistente**
+  Frames procesados
+  se escriben aquí y
+  persisten hasta que
+  se elimine el volumen
+  con ""docker-compose down -v""
+end note
+
+@enduml

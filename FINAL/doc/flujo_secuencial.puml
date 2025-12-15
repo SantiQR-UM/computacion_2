@@ -1,0 +1,121 @@
+@startuml flujo_secuencial
+!theme plain
+title Flujo Secuencial Completo de Procesamiento de Video
+caption Desde conexión del cliente hasta entrega del video procesado
+
+skinparam backgroundColor white
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+
+actor Cliente as client
+participant "Servidor\n(asyncio)" as server
+database "Redis\n(broker)" as redis
+collections "Workers\nPool" as workers
+database "Filesystem\nCompartido" as fs
+
+== FASE 1: Conexión y Handshake ==
+
+client -> server : TCP connect (IPv4/IPv6)
+activate server
+
+client -> server : **handshake** JSON\n{processing: "blur",\ncodec: "mp4v",\nvideo_info: {...}}
+server -> server : Valida request\nCrea session_id
+
+server -> client : **handshake_ack** JSON\n{accepted: true,\nsession_id: "abc123"}
+
+== FASE 2: Transmisión de Video ==
+
+loop Transmisión en chunks
+    client -> server : video bytes (chunk N)
+    server -> server : Acumula en buffer
+end
+
+client -> server : **EOF** message
+server -> server : Guarda video completo\na disco temporal
+
+== FASE 3: Extracción de Frames ==
+
+server -> server : OpenCV:\ncv2.VideoCapture(video)
+loop Para cada frame
+    server -> server : frame = cap.read()
+    server -> server : encode to PNG
+    note right: Total: 300 frames
+end
+
+== FASE 4: Distribución a Workers ==
+
+loop Para cada frame (0..299)
+    server -> redis : **Encola task**\nprocess_frame(frame_i,\n  processing="blur")
+    note right: 300 tareas\nencoladas
+end
+
+redis -> workers : **Distribuye tareas**\na workers disponibles
+activate workers
+
+== FASE 5: Procesamiento en Workers ==
+
+par Procesamiento Paralelo
+    workers -> workers : Worker 1:\nDecodifica frame 0
+    workers -> workers : Aplica blur (31x31)
+    workers -> fs : **Escribe resultado**\nframe_000000.png\nframe_000000.json
+
+    workers -> workers : Worker 2:\nProcesa frame 1
+    workers -> fs : frame_000001.png\nframe_000001.json
+
+    workers -> workers : Worker 3:\nProcesa frame 2
+    workers -> fs : frame_000002.png\nframe_000002.json
+
+    workers -> workers : Worker 4:\nProcesa frame 3
+    workers -> fs : frame_000003.png\nframe_000003.json
+
+    note over workers
+      Workers continúan procesando
+      frames 4..299 en paralelo
+    end note
+end
+
+deactivate workers
+
+== FASE 6: Polling y Recolección ==
+
+loop Para cada frame (0..299) en orden
+    server -> fs : **Polling asíncrono**:\n¿Existe frame_i.png\ny frame_i.json?
+    fs --> server : Archivo encontrado
+    server -> fs : Lee frame_i.png
+    server -> fs : Lee frame_i.json (stats)
+    server -> server : Acumula en orden
+    note right: await asyncio.sleep(0.1)\nentre checks
+end
+
+== FASE 7: Reensamblado de Video ==
+
+server -> server : cv2.VideoWriter(\n  "output.mp4",\n  codec='mp4v',\n  fps=30)
+
+loop Para cada frame en orden
+    server -> server : writer.write(frame_i)
+end
+
+server -> server : writer.release()
+note right: Video final: 52MB\n300 frames, 10 segundos
+
+== FASE 8: Envío de Resultados ==
+
+server -> server : Calcula métricas finales
+
+server -> client : **result** JSON\n{ok: true,\nmetrics: {\n  fps: 45.3,\n  latency_p95: 48.2ms,\n  ...\n}}
+
+loop Transmisión de video procesado
+    server -> client : video bytes (chunk N)
+end
+
+deactivate server
+
+client -> client : Guarda output.mp4
+client -> client : Muestra métricas
+
+note over client
+  ✅ Video procesado recibido
+  Tiempo total: ~6-7 segundos
+end note
+
+@enduml

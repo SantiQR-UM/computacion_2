@@ -1,0 +1,26 @@
+# Dockerfile para el servidor HTTP de preview
+
+FROM python:3.11-slim
+
+# Directorio de trabajo
+WORKDIR /app
+
+# Copiar requirements (solo lo necesario para el preview server)
+COPY requirements-preview.txt .
+
+# Instalar dependencias de Python
+RUN pip install --no-cache-dir -r requirements-preview.txt
+
+# Copiar código fuente
+COPY src/ ./src/
+
+# Puerto HTTP para preview
+EXPOSE 8080
+
+# Variables de entorno
+ENV REDIS_URL=redis://redis:6379/0
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Comando por defecto
+CMD ["python", "src/preview_server.py"]

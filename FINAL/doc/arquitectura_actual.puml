@@ -1,0 +1,193 @@
+@startuml arquitectura_actual
+!theme plain
+title Sistema Distribuido de Procesamiento de Video - Arquitectura Implementada
+caption Frames completos + Filesystem compartido + Celery + asyncio
+
+skinparam backgroundColor white
+skinparam componentStyle rectangle
+skinparam defaultTextAlignment center
+skinparam ArrowColor #333333
+skinparam ArrowThickness 2
+
+' Estilos personalizados
+skinparam component {
+  BackgroundColor White
+  BorderColor #333333
+  BorderThickness 2
+  FontSize 13
+}
+
+skinparam note {
+  BackgroundColor #FFE6E6
+  BorderColor #FF6666
+  BorderThickness 1
+}
+
+skinparam database {
+  BackgroundColor #FFF8DC
+  BorderColor #8B4513
+}
+
+' ============================================================================
+' COMPONENTES PRINCIPALES
+' ============================================================================
+
+package "Cliente" as client #White {
+  component "Cliente CLI" as cli [
+    **Cliente CLI**
+    ----
+    argparse
+    --video input.mp4
+    --processing blur
+    --ipv6 / --ipv4
+    --out output.mp4
+  ]
+}
+
+package "Servidor Asyncio" as server #White {
+  component "Servidor" as srv [
+    **Servidor (asyncio)**
+    ----
+    1. Extrae frames (OpenCV)
+    2. Encola frame COMPLETO
+       a Celery (1 task/frame)
+    3. Polling: espera archivos
+    4. Re-ensambla video MP4
+    + metrics collector
+  ]
+}
+
+note right of srv #FFE6E6
+  ❌ **Preview HTTP NO IMPLEMENTADO**
+  (planeado :8080)
+  /metrics
+  /frame/<n>
+end note
+
+' ============================================================================
+' INFRAESTRUCTURA
+' ============================================================================
+
+database "Redis\n(solo broker)" as redis {
+}
+
+note bottom of redis
+  Result backend
+  **eliminado**
+end note
+
+database "Filesystem\nCompartido" as fs {
+  folder "/app/data/frames/" as frames {
+    file "frame_000001.png" as f1
+    file "frame_000001.json" as j1
+    file "frame_000002.png" as f2
+    file "..." as dots
+  }
+}
+
+' ============================================================================
+' WORKERS
+' ============================================================================
+
+package "Workers Pool (Celery)\n4 contenedores Docker" as workers #F8F9FA {
+
+  component "Worker 1" as w1 [
+    **Worker 1**
+    ----
+    process_frame()
+    Frame COMPLETO
+    ----
+    Filtros OpenCV:
+    blur / edges / faces
+    ----
+    Escribe a disco:
+    PNG + JSON stats
+  ]
+
+  component "Worker 2" as w2 [
+    **Worker 2**
+    ----
+    process_frame()
+    Frame COMPLETO
+    ----
+    Filtros OpenCV:
+    motion / custom
+    ----
+    Escribe a disco:
+    PNG + JSON stats
+  ]
+
+  component "Worker 3" as w3 [
+    **Worker 3**
+    ----
+    process_frame()
+    Frame COMPLETO
+    ----
+    Filtros OpenCV:
+    configurables
+    ----
+    Escribe a disco:
+    PNG + JSON stats
+  ]
+
+  component "Worker 4" as w4 [
+    **Worker 4**
+    ----
+    process_frame()
+    ----
+    Filtros + detección
+    ----
+    Escribe: PNG + JSON
+  ]
+}
+
+' ============================================================================
+' CONEXIONES
+' ============================================================================
+
+' Cliente <-> Servidor
+cli -[#333333,thickness=2]-> srv : TCP dual-stack\nIPv4/IPv6, :9090\n(video stream)
+srv -[#333333,dashed,thickness=2]-> cli : JSON resultado\n+ video procesado
+
+' Servidor <-> Redis
+srv -[#E74C3C,thickness=2]-> redis : encola tasks\n(broker)
+
+' Redis <-> Workers
+redis -[#E74C3C,thickness=2]-> w1 : distribuye
+redis -[#E74C3C,thickness=2]-> w2 : tareas
+redis -[#E74C3C,thickness=2]-> w3 : (frames)
+redis -[#E74C3C,thickness=2]-> w4
+
+' Workers -> Filesystem
+w1 -[#8B4513,dashed,thickness=2]-> fs : escribe\nframe procesado\n+ stats JSON
+w2 -[#8B4513,dashed,thickness=2]-> fs
+w3 -[#8B4513,dashed,thickness=2]-> fs
+w4 -[#8B4513,dashed,thickness=2]-> fs
+
+' Servidor <- Filesystem (polling)
+fs -[#8B4513,dashed,thickness=2]-> srv : polling\nasync
+
+' ============================================================================
+' NOTAS EXPLICATIVAS
+' ============================================================================
+
+note bottom of fs #FFF8DC
+  **Volumen Docker Compartido**
+  Todos los contenedores
+  montan /app/data/
+end note
+
+legend bottom
+  |= Símbolo |= Descripción |
+  | <&arrow-thick-right> Sólida | Comunicación directa (TCP, Redis) |
+  | <&arrow-thick-right> Punteada | Comunicación asíncrona (polling, escritura) |
+  | <color:#E74C3C>Rojo</color> | Celery (broker de tareas) |
+  | <color:#8B4513>Marrón</color> | Filesystem (volumen compartido) |
+
+  **CAMBIO ARQUITECTÓNICO CLAVE:**
+  Redis solo como **broker** (no result backend).
+  Workers escriben a **filesystem compartido**.
+  Servidor hace **polling asíncrono** de archivos.
+endlegend
+
+@enduml
