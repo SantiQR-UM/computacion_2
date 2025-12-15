@@ -1,0 +1,10 @@
+# Dependencias del servidor HTTP de preview (solo lo necesario)
+
+# Servidor HTTP
+Flask>=3.0.0
+
+# Generación de GIF
+Pillow>=10.0.0
+
+# Conexión a Redis
+redis>=4.5.0,<5.0.0
